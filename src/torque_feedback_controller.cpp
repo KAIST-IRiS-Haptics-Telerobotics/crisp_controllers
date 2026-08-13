@@ -114,7 +114,9 @@ controller_interface::return_type TorqueFeedbackController::update(
   }
 
   auto tau_d = -params_.k_fb * tau_ext_thresholded - params_.kd * dq_;
-  auto tau_f = get_friction(dq_, friction_fp1_, friction_fp2_, friction_fp3_);
+  auto tau_f = params_.use_friction
+    ? get_friction(dq_, friction_fp1_, friction_fp2_, friction_fp3_)
+    : Eigen::VectorXd::Zero(num_joints_);
 
   // Save commanded torques for wrench computation
   tau_commanded_ = tau_d + tau_f + tau_nullspace;
