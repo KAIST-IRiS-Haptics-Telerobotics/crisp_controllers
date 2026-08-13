@@ -5,6 +5,7 @@
  * @brief Cartesian controller implementation for robot manipulation (supports impedance and OSC)
  */
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -148,6 +149,9 @@ private:
   bool new_target_wrench_;
   bool new_target_stiffness_ = false;
   bool use_topic_stiffness_ = false;
+  /** Last accepted pose/joint/wrench command receive time, steady-clock nanoseconds. */
+  std::atomic<int64_t> last_command_receive_ns_{0};
+  bool command_watchdog_active_{false};
 
   realtime_tools::RealtimeBuffer<std::shared_ptr<geometry_msgs::msg::PoseStamped>>
     target_pose_buffer_;

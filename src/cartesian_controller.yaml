@@ -313,6 +313,13 @@ cartesian_controller:
     default_value: False
     description: "If set to true, we will stop sending commands to the robot. This is mainly for debugging useful."
 
+  command_timeout_s:
+    type: double
+    default_value: 0.1
+    description: "Zero feed-forward wrench and hold the last pose when no target command is received within this interval. Zero disables the watchdog."
+    validation:
+      bounds<>: [0.0, 10.0]
+
   friction:
     fp1:
       type: double_array

@@ -32,6 +32,10 @@ torque_feedback_controller:
     description: "Minimum torque threshold below which torques are ignored"
     validation:
       bounds<>: [0.0, 10.0]
+  use_friction:
+    type: bool
+    default_value: false
+    description: "Enable the configured joint friction model. Keep false until robot-specific calibration is approved."
 
   nullspace:
     stiffness:
@@ -86,4 +90,3 @@ torque_feedback_controller:
       type: double_array
       default_value: [0.039533, 0.025882, -0.04607, 0.036194, 0.026226, -0.021047, 0.0035526]
       description: "Friction parameters part 3"
-

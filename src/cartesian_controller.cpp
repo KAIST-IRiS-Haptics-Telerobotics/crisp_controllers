@@ -1,5 +1,6 @@
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 
@@ -68,6 +69,32 @@ CartesianController::update(const rclcpp::Time & time, const rclcpp::Duration & 
   
   // Update current state information with EMA filtered values
   updateCurrentState();
+
+  const int64_t last_command_ns = last_command_receive_ns_.load(std::memory_order_relaxed);
+  const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::steady_clock::now().time_since_epoch()).count();
+  const bool command_timed_out = params_.command_timeout_s > 0.0 && last_command_ns > 0 &&
+    (now_ns - last_command_ns) >
+      static_cast<int64_t>(params_.command_timeout_s * 1.0e9);
+  if (command_timed_out) {
+    target_wrench_.setZero();
+    new_target_wrench_ = false;
+    if (!command_watchdog_active_) {
+      // Capture once at lease expiry. Continuously following the measured pose
+      // would turn the watchdog into freedrive instead of a passive hold.
+      target_position_ = end_effector_pose.translation();
+      target_orientation_ = Eigen::Quaterniond(end_effector_pose.rotation());
+      desired_position_ = target_position_;
+      desired_orientation_ = target_orientation_;
+      command_watchdog_active_ = true;
+      RCLCPP_WARN(
+        get_node()->get_logger(),
+        "Target command watchdog expired (%.0f ms); zero wrench and current-pose hold",
+        params_.command_timeout_s * 1000.0);
+    }
+  } else {
+    command_watchdog_active_ = false;
+  }
 
   // Check if new targets available
   if (new_target_pose_) {
@@ -384,6 +411,10 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
     }
     target_pose_buffer_.writeFromNonRT(msg);
     new_target_pose_ = true;
+    last_command_receive_ns_.store(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count(),
+      std::memory_order_relaxed);
   };
 
   auto target_joint_callback =
@@ -399,6 +430,10 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
     }
     target_joint_buffer_.writeFromNonRT(msg);
     new_target_joint_ = true;
+    last_command_receive_ns_.store(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count(),
+      std::memory_order_relaxed);
   };
 
   auto target_wrench_callback =
@@ -415,6 +450,10 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
     }
     target_wrench_buffer_.writeFromNonRT(msg);
     new_target_wrench_ = true;
+    last_command_receive_ns_.store(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count(),
+      std::memory_order_relaxed);
   };
 
   pose_sub_ = get_node()->create_subscription<geometry_msgs::msg::PoseStamped>(
@@ -612,6 +651,10 @@ CartesianController::on_activate(const rclcpp_lifecycle::State & /*previous_stat
   target_orientation_ = Eigen::Quaterniond(end_effector_pose.rotation());
   desired_position_ = target_position_;
   desired_orientation_ = target_orientation_;
+  last_command_receive_ns_.store(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count(),
+    std::memory_order_relaxed);
 
   RCLCPP_INFO(get_node()->get_logger(), "Controller activated.");
   return CallbackReturn::SUCCESS;
