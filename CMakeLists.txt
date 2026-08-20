@@ -54,6 +54,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(controller_interface REQUIRED)
+find_package(control_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(hardware_interface REQUIRED)
@@ -134,6 +135,7 @@ target_link_libraries(${PROJECT_NAME}
     rclcpp_lifecycle::rclcpp_lifecycle
     pinocchio::pinocchio
     realtime_tools::realtime_tools
+    ${control_msgs_TARGETS}
     ${std_msgs_TARGETS}
 )
 
@@ -170,6 +172,7 @@ install(
 
 ament_export_dependencies(
     controller_interface
+    control_msgs
     pluginlib
     rclcpp
     rclcpp_lifecycle

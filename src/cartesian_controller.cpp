@@ -65,7 +65,7 @@ CartesianController::state_interface_configuration() const {
 }
 
 controller_interface::return_type
-CartesianController::update(const rclcpp::Time & time, const rclcpp::Duration & /*period*/) {
+CartesianController::update(const rclcpp::Time & time, const rclcpp::Duration & period) {
   
   // Update current state information with EMA filtered values
   updateCurrentState();
@@ -252,6 +252,8 @@ CartesianController::update(const rclcpp::Time & time, const rclcpp::Duration & 
   }
 
   tau_previous = tau_d;
+
+  publish_controller_state_(time, period);
 
   params_listener_->refresh_dynamic_parameters();
   if (params_listener_->is_old(params_)) {
@@ -480,6 +482,19 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
   stiffness_sub_ = get_node()->create_subscription<std_msgs::msg::Float64MultiArray>(
     params_.variable_stiffness.topic, rclcpp::QoS(1), target_stiffness_callback);
 
+  const auto controller_state_topic = params_.topics.controller_state.empty()
+    ? "controller_state"
+    : params_.topics.controller_state;
+  controller_state_publisher_ =
+    get_node()->create_publisher<control_msgs::msg::JointTrajectoryControllerState>(
+      controller_state_topic, rclcpp::SystemDefaultsQoS());
+  realtime_controller_state_publisher_ = std::make_shared<
+    realtime_tools::RealtimePublisher<control_msgs::msg::JointTrajectoryControllerState>>(
+      controller_state_publisher_);
+  state_publish_interval_ = params_.state_publish_rate > 0.0
+    ? rclcpp::Duration::from_seconds(1.0 / params_.state_publish_rate)
+    : rclcpp::Duration(0, 0);
+
   RCLCPP_INFO(get_node()->get_logger(), "Variable stiffness topic: %s",
     params_.variable_stiffness.topic.c_str());
 
@@ -653,6 +668,7 @@ CartesianController::on_activate(const rclcpp_lifecycle::State & /*previous_stat
     std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count(),
     std::memory_order_relaxed);
+  state_publish_elapsed_ = rclcpp::Duration(0, 0);
 
   RCLCPP_INFO(get_node()->get_logger(), "Controller activated.");
   return CallbackReturn::SUCCESS;
@@ -730,6 +746,47 @@ void CartesianController::parse_target_stiffness_() {
   RCLCPP_INFO_THROTTLE(get_node()->get_logger(), *get_node()->get_clock(), 100,
     "Variable stiffness received: [%.1f, %.1f, %.1f, %.1f, %.1f, %.1f]",
     vals[0], vals[1], vals[2], vals[3], vals[4], vals[5]);
+}
+
+void CartesianController::publish_controller_state_(
+  const rclcpp::Time & time, const rclcpp::Duration & period) {
+  state_publish_elapsed_ = state_publish_elapsed_ + period;
+  const bool should_publish = state_publish_interval_.nanoseconds() == 0 ||
+    state_publish_elapsed_ >= state_publish_interval_;
+  if (!should_publish || !realtime_controller_state_publisher_) {
+    return;
+  }
+
+  control_msgs::msg::JointTrajectoryControllerState message;
+  message.header.stamp = time;
+  message.joint_names = params_.joints;
+  message.reference.positions.assign(q_ref.data(), q_ref.data() + q_ref.size());
+  message.reference.velocities.assign(dq_ref.data(), dq_ref.data() + dq_ref.size());
+  message.feedback.positions.assign(q.data(), q.data() + q.size());
+  message.feedback.velocities.assign(dq.data(), dq.data() + dq.size());
+  message.error.positions.resize(q.size());
+  message.error.velocities.resize(dq.size());
+  message.output.positions.assign(q_target.data(), q_target.data() + q_target.size());
+  message.output.effort.assign(tau_d.data(), tau_d.data() + tau_d.size());
+  for (Eigen::Index index = 0; index < q.size(); ++index) {
+    message.error.positions[index] = q_ref[index] - q[index];
+    message.error.velocities[index] = dq_ref[index] - dq[index];
+  }
+
+#if REALTIME_TOOLS_NEW_API
+  const bool published = realtime_controller_state_publisher_->try_publish(message);
+#else
+  bool published = false;
+  if (realtime_controller_state_publisher_->trylock()) {
+    realtime_controller_state_publisher_->msg_ = std::move(message);
+    realtime_controller_state_publisher_->unlockAndPublish();
+    published = true;
+  }
+#endif
+  if (published) {
+    state_publish_elapsed_ = state_publish_elapsed_ - state_publish_interval_;
+    state_publish_elapsed_ = std::min(state_publish_elapsed_, state_publish_interval_);
+  }
 }
 
 void CartesianController::log_debug_info(const rclcpp::Time & time) {

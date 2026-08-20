@@ -13,12 +13,14 @@
 #include <Eigen/Dense>  // NOLINT(build/include_order)
 
 #include <controller_interface/controller_interface.hpp>
+#include <control_msgs/msg/joint_trajectory_controller_state.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
 #include <pinocchio/multibody/fwd.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <realtime_tools/realtime_publisher.hpp>
 
 #include <crisp_controllers/utils/ros2_version.hpp>
 
@@ -107,6 +109,15 @@ private:
   /** @brief Subscription for variable stiffness messages */
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr stiffness_sub_;
 
+  /** 100 Hz view of the joint command as accepted and filtered by this controller. */
+  rclcpp::Publisher<control_msgs::msg::JointTrajectoryControllerState>::SharedPtr
+    controller_state_publisher_;
+  std::shared_ptr<
+    realtime_tools::RealtimePublisher<control_msgs::msg::JointTrajectoryControllerState>>
+    realtime_controller_state_publisher_;
+  rclcpp::Duration state_publish_elapsed_{0, 0};
+  rclcpp::Duration state_publish_interval_{0, 0};
+
   /** @brief Flag to indicate if multiple publishers detected */
   bool multiple_publishers_detected_;
 
@@ -143,6 +154,10 @@ private:
    * @brief Reads the target stiffness in realtime loop from the buffer and parses it to be used in the controller.
    */
   void parse_target_stiffness_();
+
+  /** Publish q_target, q_ref, controller feedback, and final commanded torque. */
+  void publish_controller_state_(
+    const rclcpp::Time & time, const rclcpp::Duration & period);
 
   bool new_target_pose_;
   bool new_target_joint_;

@@ -11,6 +11,7 @@
 
   <depend>rclcpp</depend>
   <depend>controller_interface</depend>
+  <depend>control_msgs</depend>
   <depend>rclcpp_lifecycle</depend>
   <depend>generate_parameter_library</depend>
   <depend>pinocchio</depend>

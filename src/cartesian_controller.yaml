@@ -207,6 +207,17 @@ cartesian_controller:
       type: string
       default_value: "target_wrench"
       description: "Topic name for target wrench commands."
+    controller_state:
+      type: string
+      default_value: "controller_state"
+      description: "Topic publishing the accepted joint target, filtered reference, feedback, and torque command."
+
+  state_publish_rate:
+    type: double
+    default_value: 100.0
+    description: "Controller-state telemetry rate in Hz. Zero publishes every update cycle."
+    validation:
+      bounds<>: [0.0, 1000.0]
 
   log:
     enabled:
