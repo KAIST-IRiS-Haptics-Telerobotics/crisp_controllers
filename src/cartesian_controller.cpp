@@ -470,7 +470,7 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
   };
 
   measured_wrench_sub_ = get_node()->create_subscription<geometry_msgs::msg::WrenchStamped>(
-    measured_wrench_topic, rclcpp::SensorDataQoS(), measured_wrench_callback);
+    measured_wrench_topic, rclcpp::SensorDataQoS().keep_last(1), measured_wrench_callback);
 
   auto target_stiffness_callback =
     [this](const std::shared_ptr<std_msgs::msg::Float64MultiArray> msg) -> void {
