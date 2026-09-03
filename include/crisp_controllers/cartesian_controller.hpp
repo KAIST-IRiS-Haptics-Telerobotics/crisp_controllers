@@ -5,6 +5,8 @@
  * @brief Cartesian controller implementation for robot manipulation (supports impedance and OSC)
  */
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -20,6 +22,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <crisp_controllers/utils/ros2_version.hpp>
+#include <crisp_controllers/utils/inertia_shaping.hpp>
 
 #if ROS2_VERSION_ABOVE_HUMBLE
 #include <crisp_controllers/cartesian_controller_parameters.hpp>
@@ -103,6 +106,8 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_sub_;
   /** @brief Subscription for target wrench messages */
   rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_sub_;
+  /** @brief Subscription for the compensated local F/T measurement */
+  rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr measured_wrench_sub_;
   /** @brief Subscription for variable stiffness messages */
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr stiffness_sub_;
 
@@ -138,6 +143,12 @@ private:
    */
   void parse_target_wrench_();
 
+  /** @brief Read the latest local measured wrench from the realtime buffer. */
+  void parse_measured_wrench_();
+
+  /** @brief Apply generated ROS parameters to the allocation-free inertia-shaping state. */
+  void configure_inertia_shaping_();
+
   /**
    * @brief Reads the target stiffness in realtime loop from the buffer and parses it to be used in the controller.
    */
@@ -146,6 +157,7 @@ private:
   bool new_target_pose_;
   bool new_target_joint_;
   bool new_target_wrench_;
+  std::atomic_bool new_measured_wrench_{false};
   bool new_target_stiffness_ = false;
   bool use_topic_stiffness_ = false;
 
@@ -158,6 +170,9 @@ private:
   realtime_tools::RealtimeBuffer<std::shared_ptr<geometry_msgs::msg::WrenchStamped>>
     target_wrench_buffer_;
 
+  realtime_tools::RealtimeBuffer<std::shared_ptr<geometry_msgs::msg::WrenchStamped>>
+    measured_wrench_buffer_;
+
   realtime_tools::RealtimeBuffer<std::shared_ptr<std_msgs::msg::Float64MultiArray>>
     target_stiffness_buffer_;
 
@@ -166,7 +181,17 @@ private:
   /** @brief Target orientation as quaternion */
   Eigen::Quaterniond target_orientation_;
   /** @brief Target wrench in task space */
-  Eigen::VectorXd target_wrench_;
+  CartesianWrench target_wrench_{CartesianWrench::Zero()};
+  /** @brief Compensated local F/T measurement in the controller Jacobian frame */
+  CartesianWrench measured_wrench_{CartesianWrench::Zero()};
+  /** @brief Stateful wrench-space inertia-shaping implementation */
+  InertiaShaping inertia_shaping_;
+  /** @brief Most recent inertia-shaping result, retained for diagnostics */
+  InertiaShapingOutput inertia_shaping_output_;
+  /** @brief Controller timestamp at which the latest measured wrench was consumed */
+  int64_t measured_wrench_update_ns_{0};
+  /** @brief Whether at least one measured wrench has been consumed since activation */
+  bool has_measured_wrench_{false};
   /** @brief Desired target position in Cartesian space after applying filtering */
   Eigen::Vector3d desired_position_;
   /** @brief Desired target orientation as quaternion after applying filtering */
@@ -271,6 +296,8 @@ private:
   Eigen::VectorXd tau_gravity;
   /** @brief External wrench compensation torque */
   Eigen::VectorXd tau_wrench;
+  /** @brief Local measured-wrench assistance torque */
+  Eigen::VectorXd tau_inertia_shaping;
   /** @brief Final desired torque command */
   Eigen::VectorXd tau_d;
 

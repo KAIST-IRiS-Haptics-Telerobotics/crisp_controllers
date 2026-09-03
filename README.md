@@ -16,6 +16,7 @@ CRISP is a collection of real-time, C++ controllers for compliant torque-based c
 - ❓ **Demos** showcasing how to use the controller with FR3 of Franka Emika in single and bimanual setup. Check the [crisp_controller_demos](https://github.com/utiasDSL/crisp_controllers_demos).
 - ⚙️ Dynamically and highly parametrizable: powered by the [`generate_parameter_library`](https://github.com/PickNikRobotics/generate_parameter_library) you can modify stiffness and more during operation.  
 - 🤖 Operational Space Controller as well as Cartesian Impedance Controller for torque-based control.  
+- 🖐️ Optional, filtered leader-side measured-wrench assistance and one-sample dynamics compensation, with stale-data fallback and an [evaluation protocol](docs/inertia_shaping.md).
 - 🚫 No MoveIt or complicated path-planning, just a simple C++ `ros2_controller`. Ready to use.  
 
 

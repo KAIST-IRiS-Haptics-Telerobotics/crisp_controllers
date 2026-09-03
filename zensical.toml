@@ -13,6 +13,7 @@ nav = [
         {"Custom Configs" = "getting_started_config.md"},
         {"Multi-Machine Setup" = "getting_started_multiple_machines.md"},
         {"Low-Level Controller Details" = "getting_started_controller_details.md"},
+        {"Leader-side Inertia Shaping" = "inertia_shaping.md"},
         {"How to setup a new robot"= "new_robot_setup.md"}
     ]},
     {"Examples" = [

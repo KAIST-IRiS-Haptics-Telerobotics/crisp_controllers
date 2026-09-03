@@ -194,6 +194,60 @@ cartesian_controller:
     default_value: false
     description: "If true, we use the local jacobian for computations, otherwise we use the world jacobian."
 
+  inertia_shaping:
+    measurement_sign:
+      type: int
+      default_value: 1
+      description: "Static sign s_h applied to the measured local wrench. Must be established as +1 or -1 with the documented sign test before enabling either inertia-shaping path."
+      validation:
+        one_of<>: [[-1, 1]]
+    measurement_timeout_s:
+      type: double
+      default_value: 0.05
+      description: "Maximum age of the measured local wrench. Both inertia-shaping paths are reset and disabled while the measurement is stale."
+      validation:
+        bounds<>: [0.001, 10.0]
+    active_measurement:
+      enabled:
+        type: bool
+        default_value: false
+        description: "Enable filtered local measured-wrench assistance (the active IRIS inertia-compensation path)."
+      force_scale:
+        type: double
+        default_value: 2.0
+        description: "Scale applied to the filtered measured force before J^T mapping."
+        validation:
+          bounds<>: [0.0, 10.0]
+      torque_scale:
+        type: double
+        default_value: 3.0
+        description: "Scale applied to the filtered measured torque before J^T mapping."
+        validation:
+          bounds<>: [0.0, 10.0]
+      filter_alpha:
+        type: double
+        default_value: 0.99
+        description: "EMA previous-output weight for the measured wrench; 0 bypasses filtering and values near 1 increase smoothing."
+        validation:
+          bounds<>: [0.0, 0.999999]
+    one_sample:
+      enabled:
+        type: bool
+        default_value: false
+        description: "Enable one-sample dynamics compensation: current environment wrench plus gamma times the preceding filtered force-tracking residual."
+      gamma:
+        type: double
+        default_value: 0.1
+        description: "Gain on the one-sample-old filtered residual. Must remain strictly between 0 and 1."
+        validation:
+          bounds<>: [0.000001, 0.999999]
+      filter_alpha:
+        type: double
+        default_value: 0.99
+        description: "EMA previous-output weight for the force-tracking residual."
+        validation:
+          bounds<>: [0.0, 0.999999]
+
   topics:
     target_pose:
       type: string
@@ -207,6 +261,10 @@ cartesian_controller:
       type: string
       default_value: "target_wrench"
       description: "Topic name for target wrench commands."
+    measured_wrench:
+      type: string
+      default_value: "measured_wrench"
+      description: "Topic carrying the compensated local wrench in the same frame and application point as the controller Jacobian."
 
   log:
     enabled:

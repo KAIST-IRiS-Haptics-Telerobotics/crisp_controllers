@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 #include <Eigen/src/Core/Matrix.h>  // NOLINT(build/include_order)
 #include <fmt/format.h>
@@ -81,6 +82,11 @@ CartesianController::update(const rclcpp::Time & time, const rclcpp::Duration & 
   if (new_target_wrench_) {
     parse_target_wrench_();
     new_target_wrench_ = false;
+  }
+  if (new_measured_wrench_.exchange(false, std::memory_order_acquire)) {
+    parse_measured_wrench_();
+    measured_wrench_update_ns_ = time.nanoseconds();
+    has_measured_wrench_ = true;
   }
   if (new_target_stiffness_) {
     parse_target_stiffness_();
@@ -206,10 +212,37 @@ CartesianController::update(const rclcpp::Time & time, const rclcpp::Duration & 
     ? pinocchio::computeGeneralizedGravity(model_, data_, q_pin)
     : Eigen::VectorXd::Zero(model_.nv);
 
-  tau_wrench << J.transpose() * target_wrench_;
+  const bool inertia_shaping_enabled =
+    params_.inertia_shaping.active_measurement.enabled ||
+    params_.inertia_shaping.one_sample.enabled;
+  const double measured_wrench_age_s = has_measured_wrench_
+    ? static_cast<double>(time.nanoseconds() - measured_wrench_update_ns_) * 1e-9
+    : std::numeric_limits<double>::infinity();
+  const bool measured_wrench_fresh =
+    has_measured_wrench_ && measured_wrench_age_s >= 0.0 &&
+    measured_wrench_age_s <= params_.inertia_shaping.measurement_timeout_s;
+
+  if (inertia_shaping_enabled && measured_wrench_fresh) {
+    inertia_shaping_output_ = inertia_shaping_.update(target_wrench_, measured_wrench_);
+  } else {
+    if (inertia_shaping_enabled) {
+      RCLCPP_WARN_THROTTLE(
+        get_node()->get_logger(),
+        *get_node()->get_clock(),
+        1000,
+        "Measured wrench '%s' is unavailable or stale (age %.3f s); resetting inertia shaping.",
+        params_.topics.measured_wrench.c_str(),
+        measured_wrench_age_s);
+    }
+    inertia_shaping_.reset();
+    inertia_shaping_output_ = inertia_shaping_.passthrough(target_wrench_);
+  }
+
+  tau_wrench << J.transpose() * inertia_shaping_output_.commanded_environment_wrench;
+  tau_inertia_shaping << J.transpose() * inertia_shaping_output_.active_measurement_wrench;
 
   tau_d << tau_task + tau_nullspace + tau_friction + tau_coriolis + tau_gravity + tau_joint_limits +
-      tau_wrench;
+      tau_wrench + tau_inertia_shaping;
 
   if (params_.limit_torques) {
     tau_d = saturateTorqueRate(tau_d, tau_previous, params_.max_delta_tau);
@@ -232,6 +265,7 @@ CartesianController::update(const rclcpp::Time & time, const rclcpp::Duration & 
   if (params_listener_->is_old(params_)) {
     params_ = params_listener_->get_params();
     setStiffnessAndDamping();
+    configure_inertia_shaping_();
   }
 
   log_debug_info(time);
@@ -358,6 +392,7 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
   new_target_pose_ = false;
   new_target_joint_ = false;
   new_target_wrench_ = false;
+  new_measured_wrench_.store(false, std::memory_order_release);
   new_target_stiffness_ = false;
   use_topic_stiffness_ = false;
 
@@ -370,6 +405,8 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
     params_.topics.target_joint.empty() ? "target_joint" : params_.topics.target_joint;
   const auto target_wrench_topic =
     params_.topics.target_wrench.empty() ? "target_wrench" : params_.topics.target_wrench;
+  const auto measured_wrench_topic =
+    params_.topics.measured_wrench.empty() ? "measured_wrench" : params_.topics.measured_wrench;
 
   auto target_pose_callback =
     [this, target_pose_topic](const std::shared_ptr<geometry_msgs::msg::PoseStamped> msg) -> void {
@@ -426,6 +463,15 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
   wrench_sub_ = get_node()->create_subscription<geometry_msgs::msg::WrenchStamped>(
     target_wrench_topic, rclcpp::QoS(1), target_wrench_callback);
 
+  auto measured_wrench_callback =
+    [this](const std::shared_ptr<geometry_msgs::msg::WrenchStamped> msg) -> void {
+    measured_wrench_buffer_.writeFromNonRT(msg);
+    new_measured_wrench_.store(true, std::memory_order_release);
+  };
+
+  measured_wrench_sub_ = get_node()->create_subscription<geometry_msgs::msg::WrenchStamped>(
+    measured_wrench_topic, rclcpp::SensorDataQoS(), measured_wrench_callback);
+
   auto target_stiffness_callback =
     [this](const std::shared_ptr<std_msgs::msg::Float64MultiArray> msg) -> void {
     if (!check_topic_publisher_count(params_.variable_stiffness.topic)) {
@@ -455,12 +501,18 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
   tau_coriolis = Eigen::VectorXd::Zero(model_.nv);
   tau_gravity = Eigen::VectorXd::Zero(model_.nv);
   tau_wrench = Eigen::VectorXd::Zero(model_.nv);
+  tau_inertia_shaping = Eigen::VectorXd::Zero(model_.nv);
   tau_d = Eigen::VectorXd::Zero(model_.nv);
 
   // Initialize target state vectors
   target_position_ = Eigen::Vector3d::Zero();
   target_orientation_ = Eigen::Quaterniond::Identity();
-  target_wrench_ = Eigen::VectorXd::Zero(6);
+  target_wrench_.setZero();
+  measured_wrench_.setZero();
+  inertia_shaping_.reset();
+  inertia_shaping_output_ = inertia_shaping_.passthrough(target_wrench_);
+  measured_wrench_update_ns_ = 0;
+  has_measured_wrench_ = false;
   desired_position_ = Eigen::Vector3d::Zero();
   desired_orientation_ = Eigen::Quaterniond::Identity();
 
@@ -470,6 +522,8 @@ CartesianController::on_configure(const rclcpp_lifecycle::State & /*previous_sta
 
   // Initialize nullspace projection matrix
   nullspace_projection = Eigen::MatrixXd::Identity(model_.nv, model_.nv);
+
+  configure_inertia_shaping_();
 
 #if HAS_ROS2_CONTROL_INTROSPECTION
   if (params_.enable_introspection) {
@@ -613,12 +667,20 @@ CartesianController::on_activate(const rclcpp_lifecycle::State & /*previous_stat
   desired_position_ = target_position_;
   desired_orientation_ = target_orientation_;
 
+  inertia_shaping_.reset();
+  inertia_shaping_output_ = inertia_shaping_.passthrough(target_wrench_);
+  measured_wrench_update_ns_ = 0;
+  has_measured_wrench_ = false;
+
   RCLCPP_INFO(get_node()->get_logger(), "Controller activated.");
   return CallbackReturn::SUCCESS;
 }
 
 controller_interface::CallbackReturn
 CartesianController::on_deactivate(const rclcpp_lifecycle::State & /*previous_state*/) {
+  inertia_shaping_.reset();
+  measured_wrench_update_ns_ = 0;
+  has_measured_wrench_ = false;
   return CallbackReturn::SUCCESS;
 }
 
@@ -652,6 +714,25 @@ void CartesianController::parse_target_wrench_() {
   auto msg = *target_wrench_buffer_.readFromRT();
   target_wrench_ << msg->wrench.force.x, msg->wrench.force.y, msg->wrench.force.z,
     msg->wrench.torque.x, msg->wrench.torque.y, msg->wrench.torque.z;
+}
+
+void CartesianController::parse_measured_wrench_() {
+  auto msg = *measured_wrench_buffer_.readFromRT();
+  measured_wrench_ << msg->wrench.force.x, msg->wrench.force.y, msg->wrench.force.z,
+    msg->wrench.torque.x, msg->wrench.torque.y, msg->wrench.torque.z;
+}
+
+void CartesianController::configure_inertia_shaping_() {
+  InertiaShapingConfig config;
+  config.active_measurement_enabled = params_.inertia_shaping.active_measurement.enabled;
+  config.active_force_scale = params_.inertia_shaping.active_measurement.force_scale;
+  config.active_torque_scale = params_.inertia_shaping.active_measurement.torque_scale;
+  config.active_filter_alpha = params_.inertia_shaping.active_measurement.filter_alpha;
+  config.one_sample_enabled = params_.inertia_shaping.one_sample.enabled;
+  config.one_sample_gamma = params_.inertia_shaping.one_sample.gamma;
+  config.one_sample_filter_alpha = params_.inertia_shaping.one_sample.filter_alpha;
+  config.measurement_sign = static_cast<double>(params_.inertia_shaping.measurement_sign);
+  inertia_shaping_.configure(config);
 }
 
 void CartesianController::parse_target_stiffness_() {
@@ -797,6 +878,16 @@ void CartesianController::log_debug_info(const rclcpp::Time & time) {
       *get_node()->get_clock(),
       1000,
       "tau_coriolis: " << tau_coriolis.transpose());
+    RCLCPP_INFO_STREAM_THROTTLE(
+      get_node()->get_logger(),
+      *get_node()->get_clock(),
+      1000,
+      "tau_inertia_shaping: " << tau_inertia_shaping.transpose());
+    RCLCPP_INFO_STREAM_THROTTLE(
+      get_node()->get_logger(),
+      *get_node()->get_clock(),
+      1000,
+      "inertia_residual: " << inertia_shaping_output_.filtered_residual_wrench.transpose());
   }
 
   if (params_.log.dynamic_params) {

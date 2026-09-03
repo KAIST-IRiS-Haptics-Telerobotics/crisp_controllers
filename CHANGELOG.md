@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* add parameterized leader-side measured-wrench assistance and one-sample dynamics compensation
+
 ## [2.4.1](https://github.com/learnsyslab/crisp_controllers/compare/v2.4.0...v2.4.1) (2026-07-25)
 
 
