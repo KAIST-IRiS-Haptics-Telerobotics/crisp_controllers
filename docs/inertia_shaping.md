@@ -70,7 +70,7 @@ gravity_compensation:
         torque_scale: 0.0       # identify translation first
         filter_alpha: 0.99
         zero_on_enable: true    # keep the endpoint untouched while capturing
-        zero_samples: 1000      # one second at a 1 kHz controller rate
+        zero_samples: 200       # 0.2 seconds at a 1 kHz controller rate
       one_sample:
         enabled: false
         gamma: 0.02             # begin with a small value

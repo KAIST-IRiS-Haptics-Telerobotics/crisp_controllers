@@ -236,7 +236,7 @@ cartesian_controller:
         description: "Capture a controller-local measured-wrench zero after each activation before applying active assistance. The published sensor wrench is unchanged."
       zero_samples:
         type: int
-        default_value: 1000
+        default_value: 200
         description: "Number of controller updates used for local active-assistance zero capture. Keep the endpoint untouched during this interval."
         validation:
           bounds<>: [1, 100000]

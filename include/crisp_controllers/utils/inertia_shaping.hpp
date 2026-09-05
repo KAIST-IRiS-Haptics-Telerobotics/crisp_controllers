@@ -17,7 +17,7 @@ struct InertiaShapingConfig {
   double active_torque_scale{3.0};
   double active_filter_alpha{0.99};
   bool active_zero_on_enable{false};
-  std::size_t active_zero_samples{1000};
+  std::size_t active_zero_samples{200};
 
   bool one_sample_enabled{false};
   double one_sample_gamma{0.1};
