@@ -9,13 +9,16 @@ controller.
 
 Let `f_e[k]` be the environment wrench reflected from the follower, `w_h[k]` the compensated local
 leader F/T measurement, and `J[k]` the leader end-effector Jacobian. The configured static sign
-`s_h` is either `-1` or `+1` and aligns the sensor convention with the controller convention.
+`s_h` is either `-1` or `+1` and aligns the sensor convention with the controller convention. When
+activation-local zero capture is enabled, `b_h` is the mean of the first configured number of
+samples after controller activation and the active path uses `w_h[k] - b_h`. Its output remains
+zero while the mean is being captured.
 
 The active-measurement path is the behavior that was active in the original IRIS local Panda
 driver:
 
 \[
-\bar w_h[k] = \alpha_h \bar w_h[k-1] + (1-\alpha_h)s_h w_h[k],
+\bar w_h[k] = \alpha_h \bar w_h[k-1] + (1-\alpha_h)(s_h w_h[k]-b_h),
 \]
 
 \[
@@ -66,6 +69,8 @@ gravity_compensation:
         force_scale: 0.05       # begin well below the historical 2.0
         torque_scale: 0.0       # identify translation first
         filter_alpha: 0.99
+        zero_on_enable: true    # keep the endpoint untouched while capturing
+        zero_samples: 1000      # one second at a 1 kHz controller rate
       one_sample:
         enabled: false
         gamma: 0.02             # begin with a small value
@@ -77,7 +82,9 @@ use `f_c ~= -f_s ln(alpha)/(2 pi)` when matching the filter bandwidth.
 
 If the wrench is missing or older than `measurement_timeout_s`, both measured-wrench paths are
 suppressed and their filter state is reset. Ordinary pose control and reflected `target_wrench`
-remain active.
+remain active. Zero capture affects only the local active-assistance term: it does not alter the
+published F/T topics or the one-sample residual. A stale-wrench reset deliberately starts a new
+zero capture before active assistance resumes.
 
 ## Static sign test
 

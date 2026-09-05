@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 #include <Eigen/Dense>  // NOLINT(build/include_order)
 
 #include "crisp_controllers/utils/fiters.hpp"
@@ -14,6 +16,8 @@ struct InertiaShapingConfig {
   double active_force_scale{2.0};
   double active_torque_scale{3.0};
   double active_filter_alpha{0.99};
+  bool active_zero_on_enable{false};
+  std::size_t active_zero_samples{1000};
 
   bool one_sample_enabled{false};
   double one_sample_gamma{0.1};
@@ -29,6 +33,8 @@ struct InertiaShapingOutput {
   CartesianWrench active_measurement_wrench{CartesianWrench::Zero()};
   CartesianWrench filtered_measurement_wrench{CartesianWrench::Zero()};
   CartesianWrench filtered_residual_wrench{CartesianWrench::Zero()};
+  CartesianWrench active_measurement_bias{CartesianWrench::Zero()};
+  bool active_measurement_ready{true};
 };
 
 /**
@@ -51,7 +57,10 @@ public:
     const bool active_just_enabled =
       !config_.active_measurement_enabled && config.active_measurement_enabled;
     const bool one_sample_just_enabled = !config_.one_sample_enabled && config.one_sample_enabled;
-    if (sign_changed || active_just_enabled || one_sample_just_enabled) {
+    const bool zeroing_changed =
+      config_.active_zero_on_enable != config.active_zero_on_enable ||
+      config_.active_zero_samples != config.active_zero_samples;
+    if (sign_changed || active_just_enabled || one_sample_just_enabled || zeroing_changed) {
       reset();
     }
     config_ = config;
@@ -63,15 +72,31 @@ public:
     output.commanded_environment_wrench = environment_wrench;
 
     const CartesianWrench aligned_measurement = config_.measurement_sign * measured_wrench;
-    filtered_measurement_ = exponential_moving_average(
-      filtered_measurement_, aligned_measurement, config_.active_filter_alpha);
-    output.filtered_measurement_wrench = filtered_measurement_;
+    CartesianWrench active_measurement = aligned_measurement;
+    if (
+      config_.active_measurement_enabled && config_.active_zero_on_enable &&
+      active_zero_count_ < config_.active_zero_samples) {
+      ++active_zero_count_;
+      active_measurement_bias_ +=
+        (aligned_measurement - active_measurement_bias_) / static_cast<double>(active_zero_count_);
+      output.active_measurement_bias = active_measurement_bias_;
+      output.active_measurement_ready = false;
+    } else {
+      if (config_.active_measurement_enabled && config_.active_zero_on_enable) {
+        active_measurement -= active_measurement_bias_;
+      }
+      filtered_measurement_ = exponential_moving_average(
+        filtered_measurement_, active_measurement, config_.active_filter_alpha);
+      output.filtered_measurement_wrench = filtered_measurement_;
+      output.active_measurement_bias = active_measurement_bias_;
+      output.active_measurement_ready = true;
 
-    if (config_.active_measurement_enabled) {
-      output.active_measurement_wrench.head<3>() =
-        config_.active_force_scale * filtered_measurement_.head<3>();
-      output.active_measurement_wrench.tail<3>() =
-        config_.active_torque_scale * filtered_measurement_.tail<3>();
+      if (config_.active_measurement_enabled) {
+        output.active_measurement_wrench.head<3>() =
+          config_.active_force_scale * filtered_measurement_.head<3>();
+        output.active_measurement_wrench.tail<3>() =
+          config_.active_torque_scale * filtered_measurement_.tail<3>();
+      }
     }
 
     // Use the residual retained from the preceding controller cycle.
@@ -96,12 +121,16 @@ public:
   void reset() {
     filtered_measurement_.setZero();
     filtered_residual_.setZero();
+    active_measurement_bias_.setZero();
+    active_zero_count_ = 0;
   }
 
 private:
   InertiaShapingConfig config_{};
   CartesianWrench filtered_measurement_{CartesianWrench::Zero()};
   CartesianWrench filtered_residual_{CartesianWrench::Zero()};
+  CartesianWrench active_measurement_bias_{CartesianWrench::Zero()};
+  std::size_t active_zero_count_{0};
 };
 
 }  // namespace crisp_controllers

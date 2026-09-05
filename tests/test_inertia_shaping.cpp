@@ -38,6 +38,51 @@ TEST(InertiaShapingTest, ActiveMeasurementAppliesSignFilterAndSeparateScales) {
   EXPECT_TRUE(output.active_measurement_wrench.tail<3>().isApprox(Eigen::Vector3d::Constant(-1.5)));
 }
 
+TEST(InertiaShapingTest, ActiveMeasurementCanCaptureAndRemoveActivationBias) {
+  InertiaShaping shaping;
+  InertiaShapingConfig config;
+  config.active_measurement_enabled = true;
+  config.active_force_scale = 2.0;
+  config.active_torque_scale = 3.0;
+  config.active_filter_alpha = 0.0;
+  config.active_zero_on_enable = true;
+  config.active_zero_samples = 2;
+  shaping.configure(config);
+
+  const CartesianWrench bias =
+    (CartesianWrench() << 1.0, -2.0, 3.0, 0.1, -0.2, 0.3).finished();
+  const auto first = shaping.update(CartesianWrench::Zero(), bias);
+  const auto second = shaping.update(CartesianWrench::Zero(), bias);
+  EXPECT_FALSE(first.active_measurement_ready);
+  EXPECT_FALSE(second.active_measurement_ready);
+  EXPECT_TRUE(first.active_measurement_wrench.isZero());
+  EXPECT_TRUE(second.active_measurement_wrench.isZero());
+
+  CartesianWrench contact = bias;
+  contact[0] += 4.0;
+  contact[3] += 0.5;
+  const auto third = shaping.update(CartesianWrench::Zero(), contact);
+  EXPECT_TRUE(third.active_measurement_ready);
+  EXPECT_TRUE(third.active_measurement_bias.isApprox(bias));
+  EXPECT_DOUBLE_EQ(third.active_measurement_wrench[0], 8.0);
+  EXPECT_DOUBLE_EQ(third.active_measurement_wrench[3], 1.5);
+}
+
+TEST(InertiaShapingTest, ResetRestartsActiveMeasurementBiasCapture) {
+  InertiaShaping shaping;
+  InertiaShapingConfig config;
+  config.active_measurement_enabled = true;
+  config.active_zero_on_enable = true;
+  config.active_zero_samples = 1;
+  shaping.configure(config);
+
+  const CartesianWrench bias = CartesianWrench::Ones();
+  EXPECT_FALSE(shaping.update(CartesianWrench::Zero(), bias).active_measurement_ready);
+  EXPECT_TRUE(shaping.update(CartesianWrench::Zero(), bias).active_measurement_ready);
+  shaping.reset();
+  EXPECT_FALSE(shaping.update(CartesianWrench::Zero(), bias).active_measurement_ready);
+}
+
 TEST(InertiaShapingTest, OneSamplePathUsesPreviousFilteredResidual) {
   InertiaShaping shaping;
   InertiaShapingConfig config;

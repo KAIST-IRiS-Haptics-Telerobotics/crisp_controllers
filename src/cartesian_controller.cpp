@@ -728,6 +728,9 @@ void CartesianController::configure_inertia_shaping_() {
   config.active_force_scale = params_.inertia_shaping.active_measurement.force_scale;
   config.active_torque_scale = params_.inertia_shaping.active_measurement.torque_scale;
   config.active_filter_alpha = params_.inertia_shaping.active_measurement.filter_alpha;
+  config.active_zero_on_enable = params_.inertia_shaping.active_measurement.zero_on_enable;
+  config.active_zero_samples =
+    static_cast<std::size_t>(params_.inertia_shaping.active_measurement.zero_samples);
   config.one_sample_enabled = params_.inertia_shaping.one_sample.enabled;
   config.one_sample_gamma = params_.inertia_shaping.one_sample.gamma;
   config.one_sample_filter_alpha = params_.inertia_shaping.one_sample.filter_alpha;
@@ -883,6 +886,13 @@ void CartesianController::log_debug_info(const rclcpp::Time & time) {
       *get_node()->get_clock(),
       1000,
       "tau_inertia_shaping: " << tau_inertia_shaping.transpose());
+    RCLCPP_INFO_STREAM_THROTTLE(
+      get_node()->get_logger(),
+      *get_node()->get_clock(),
+      1000,
+      "inertia_measurement_bias: "
+        << inertia_shaping_output_.active_measurement_bias.transpose()
+        << ", ready: " << inertia_shaping_output_.active_measurement_ready);
     RCLCPP_INFO_STREAM_THROTTLE(
       get_node()->get_logger(),
       *get_node()->get_clock(),

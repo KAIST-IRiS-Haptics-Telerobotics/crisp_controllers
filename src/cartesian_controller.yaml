@@ -230,6 +230,16 @@ cartesian_controller:
         description: "EMA previous-output weight for the measured wrench; 0 bypasses filtering and values near 1 increase smoothing."
         validation:
           bounds<>: [0.0, 0.999999]
+      zero_on_enable:
+        type: bool
+        default_value: false
+        description: "Capture a controller-local measured-wrench zero after each activation before applying active assistance. The published sensor wrench is unchanged."
+      zero_samples:
+        type: int
+        default_value: 1000
+        description: "Number of controller updates used for local active-assistance zero capture. Keep the endpoint untouched during this interval."
+        validation:
+          bounds<>: [1, 100000]
     one_sample:
       enabled:
         type: bool
