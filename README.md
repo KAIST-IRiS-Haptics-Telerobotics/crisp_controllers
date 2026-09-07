@@ -6,6 +6,26 @@
 
 CRISP is a collection of real-time, C++ controllers for compliant torque-based control for manipulators compatible with `ros2_control`, including **Cartesian Impedance Control** and **Operational Space Control**. Developed for deploying high-level learning-based policies (VLA, Diffusion, ...) and teleoperation on your manipulator. It is robot-agnostic and compatible with any manipulator offering and effort interface. Check the [project website](https://utiasdsl.github.io/crisp_controllers/) for guides, getting started, demos and more! 
 
+## IRiS private fork
+
+This repository is the IRiS lab's private, API-compatible fork of
+[`utiasDSL/crisp_controllers`](https://github.com/utiasDSL/crisp_controllers). The ROS package and
+plugin names intentionally remain `crisp_controllers`, so existing robot descriptions and
+controller YAML files continue to work.
+
+Additional features maintained by IRiS over upstream are:
+
+- leader-side active assistance from a compensated local F/T measurement, with an explicit sensor
+  sign, independent force/torque scaling, low-pass filtering, activation-local zero capture, and
+  stale-measurement fail-safe behavior;
+- one-sample dynamics compensation in wrench space, with configurable gain and filtering;
+- tests and a staged hardware evaluation protocol for using both paths independently or together
+  in bilateral FR3 teleoperation.
+
+The implementation and commissioning procedure are documented in
+[`docs/inertia_shaping.md`](docs/inertia_shaping.md). Features unique to this fork are opt-in and
+disabled by default unless an IRiS controller profile enables them.
+
 
 > [!NOTE]
 > To reduce maintenance overhead, all ROS 2 distributions are supported from a single `main` branch. The code uses compile-time macros to handle version-specific differences.
